@@ -1,7 +1,8 @@
 export type Action =
   | 'forward' | 'back' | 'left' | 'right'
   | 'jump' | 'sprint' | 'crouch' | 'interact'
-  | 'toggleCamera' | 'inventory' | 'map' | 'pause';
+  | 'toggleCamera' | 'inventory' | 'map' | 'pause'
+  | 'use' | 'build' | 'rest' | 'throw' | 'rotate' | 'primary' | 'secondary';
 
 export type Bindings = Record<Action, string[]>;
 
@@ -18,6 +19,13 @@ export const DEFAULT_BINDINGS: Bindings = {
   inventory: ['KeyI', 'Tab'],
   map: ['KeyM'],
   pause: ['KeyP'],
+  use: ['KeyF'],
+  build: ['KeyB'],
+  rest: ['KeyR'],
+  throw: ['KeyG'],
+  rotate: ['KeyQ'],
+  primary: ['Mouse0'],
+  secondary: ['Mouse2'],
 };
 
 const BIND_KEY = 'manvswild.bindings.v1';
@@ -48,6 +56,13 @@ export class InputManager {
       if (this.locked && (e.code === 'Tab' || e.code === 'Space')) e.preventDefault();
     });
     add('keyup', (e) => this.down.delete(e.code));
+    add('mousedown', (e) => {
+      if (!this.locked) return;
+      const code = 'Mouse' + e.button;
+      this.down.add(code);
+      this.pressedCodes.add(code);
+    });
+    add('mouseup', (e) => this.down.delete('Mouse' + e.button));
     add('blur', () => this.down.clear());
     add('mousemove', (e) => {
       if (!this.locked) return;
@@ -91,6 +106,11 @@ export class InputManager {
   wasPressed(a: Action): boolean {
     return this.bindings[a].some((c) => this.pressedCodes.has(c)) ||
       (!!this.padButtons[a] && !this.prevPadButtons[a]);
+  }
+
+  /** Raw key code pressed this frame (for hotbar digits). */
+  codePressed(code: string): boolean {
+    return this.pressedCodes.has(code);
   }
 
   /** Movement axes in [-1,1]; x right, y forward. */

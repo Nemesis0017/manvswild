@@ -22,6 +22,7 @@ export interface GameEvents extends Record<string, unknown> {
   cameraModeChanged: { mode: 'first' | 'third' };
   playerJumped: undefined;
   playerLanded: { speed: number };
+  signalRaised: { x: number; z: number };
 }
 
 export const events = new EventBus<GameEvents>();

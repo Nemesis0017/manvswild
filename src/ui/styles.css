@@ -19,3 +19,39 @@
 .mvw-hud { position: absolute; left: 14px; top: 12px; font-size: 13px; text-shadow: 0 1px 3px #000; pointer-events: none; }
 .mvw-uw { position: absolute; inset: 0; background: rgba(10,60,90,.35); pointer-events: none; }
 .mvw-high-contrast .mvw-hud, .mvw-high-contrast .mvw-keys { font-weight: 700; opacity: 1; }
+
+/* Survival HUD */
+.mvw-stats { position: absolute; left: 14px; bottom: 14px; display: grid; gap: 4px; width: 230px; pointer-events: none; text-shadow: 0 1px 2px #000; }
+.mvw-stat { display: grid; grid-template-columns: 78px 1fr 44px; align-items: center; gap: 6px; font-size: 12px; }
+.mvw-bar { height: 8px; background: rgba(0,0,0,.5); border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,.2); }
+.mvw-fill { height: 100%; transition: width .2s; }
+.mvw-stat-num { text-align: right; opacity: .85; }
+.mvw-warn { font-size: 12px; color: #ffd27a; }
+.mvw-env { position: absolute; right: 14px; top: 12px; text-align: right; font-size: 13px; text-shadow: 0 1px 3px #000; pointer-events: none; line-height: 1.5; }
+.mvw-log { position: absolute; left: 14px; top: 40px; max-width: 460px; font-size: 13px; text-shadow: 0 1px 3px #000; pointer-events: none; display: grid; gap: 2px; }
+.mvw-prompt { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); background: rgba(0,0,0,.55); padding: 6px 12px; border-radius: 6px; font-size: 14px; pointer-events: none; max-width: 80%; text-align: center; }
+.mvw-hotbar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 4px; }
+.mvw-keyhint { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); font-size: 11px; opacity: .6; pointer-events: none; white-space: nowrap; }
+.mvw-slot { position: relative; width: 62px; height: 52px; background: rgba(10,16,10,.65); border: 1px solid rgba(255,255,255,.25); border-radius: 5px; color: #eef3e6; font-size: 10px; cursor: pointer; padding: 2px; display: flex; align-items: center; justify-content: center; text-align: center; }
+.mvw-slot.sel { border-color: #ffd27a; box-shadow: 0 0 0 1px #ffd27a; }
+.mvw-slot-n { position: absolute; left: 3px; top: 1px; opacity: .6; }
+.mvw-slot-count { position: absolute; right: 3px; bottom: 1px; font-weight: 700; font-size: 11px; }
+.mvw-slot-dur { position: absolute; left: 2px; bottom: 1px; height: 3px; background: #7ac35a; }
+.mvw-fade { position: absolute; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; }
+.mvw-modal { text-align: center; max-width: 420px; }
+.mvw-panelwrap { position: absolute; inset: 0; display: flex; gap: 14px; align-items: flex-start; justify-content: center; padding: 40px 14px; background: rgba(0,0,0,.45); overflow: auto; }
+.mvw-inv { background: rgba(16,24,14,.92); border: 1px solid rgba(255,255,255,.2); border-radius: 8px; padding: 12px; min-width: 300px; max-width: 420px; }
+.mvw-inv-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.mvw-inv-head h3 { margin: 0; }
+.mvw-grid { display: grid; grid-template-columns: repeat(5, 62px); gap: 4px; margin: 10px 0; }
+.mvw-hint { font-size: 12px; opacity: .7; margin: 4px 0; }
+.mvw-equip, .mvw-skills { font-size: 13px; display: grid; gap: 4px; margin-top: 6px; }
+.mvw-skills { grid-auto-flow: column; justify-content: start; gap: 14px; opacity: .85; }
+.mvw-recipes { display: grid; gap: 6px; max-height: 70vh; overflow: auto; }
+.mvw-recipe { border: 1px solid rgba(255,255,255,.15); border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+.mvw-recipe.blocked { opacity: .6; }
+.mvw-cost { opacity: .75; font-size: 12px; }
+.mvw-link { background: none; border: 1px solid rgba(255,255,255,.4); color: #eef3e6; border-radius: 4px; cursor: pointer; padding: 2px 8px; font-size: 12px; }
+.mvw-link:disabled { opacity: .4; cursor: default; }
+.mvw-x { background: none; border: 1px solid rgba(255,255,255,.4); color: #eef3e6; border-radius: 4px; cursor: pointer; padding: 2px 8px; }
+.mvw-high-contrast .mvw-stat-label, .mvw-high-contrast .mvw-log, .mvw-high-contrast .mvw-env { font-weight: 700; }

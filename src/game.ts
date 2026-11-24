@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { gameStore } from './core/gameState';
+import { Gameplay } from './gameplay/gameplay';
 import { InputManager } from './core/input';
 import { GameLoop } from './core/loop';
 import { PRESETS, settingsStore } from './core/settings';
@@ -26,6 +27,7 @@ export class Game {
   readonly sky: Sky;
   readonly water: Water;
   readonly character: CharacterController;
+  readonly gameplay: Gameplay;
   readonly model = new PlayerModel();
   readonly cam: PlayerCamera;
   private loop: GameLoop;
@@ -43,7 +45,7 @@ export class Game {
   private disposed = false;
   private introPlayed = false;
   private onLockChange = () => {
-    if (!document.pointerLockElement && gameStore.getState().status === 'playing') this.setPaused(true);
+    if (!document.pointerLockElement && gameStore.getState().status === 'playing' && !this.gameplay.panelOpen) this.setPaused(true);
   };
 
   private constructor(private container: HTMLElement, physics: PhysicsWorld) {
@@ -77,6 +79,7 @@ export class Game {
     this.character = new CharacterController(physics, this.terrain, spawn.x, gy + 0.6, spawn.z);
     physics.step(1 / 60);
     physics.step(1 / 60);
+    this.gameplay = new Gameplay(this.scene, this.terrain, this.character, this.cam, this.sky, s.seed, spawn);
 
     this.resizeObs = new ResizeObserver(() => this.resize());
     this.resizeObs.observe(container);
@@ -96,6 +99,7 @@ export class Game {
     gameStore.setState({ loadMessage: 'Generating world' });
     const g = new Game(container, physics);
     gameStore.setState({ status: 'menu', loadMessage: 'Ready' });
+    if (location.search.includes('debug')) (window as unknown as { __mvw: Game }).__mvw = g;
     return g;
   }
 
@@ -160,24 +164,36 @@ export class Game {
 
     if (this.cam.introActive) {
       if (inp.wasPressed('jump') || inp.wasPressed('interact')) this.cam.skipIntro();
-      this.character.frozen = true;
-    } else {
-      this.character.frozen = false;
     }
     if (inp.wasPressed('toggleCamera') && !this.cam.introActive) this.cam.toggle();
 
+    const gp = this.gameplay;
+    const playing = !this.cam.introActive;
+    const panelBefore = gp.panelOpen;
+    if (playing) gp.handleInput(inp, this.camera);
+    if (gp.panelOpen !== panelBefore) {
+      if (gp.panelOpen) document.exitPointerLock?.();
+      else this.input.requestLock();
+    }
+    const mod = gp.preMove();
+    this.character.frozen = this.cam.introActive || mod.freeze;
+    const blocked = this.cam.introActive || mod.lockMovement;
     const axes = inp.moveAxes();
+    const exhausted = gp.survival.exhausted;
     this.character.update(dt, {
-      x: this.cam.introActive ? 0 : axes.x,
-      y: this.cam.introActive ? 0 : axes.y,
+      x: blocked ? 0 : axes.x,
+      y: blocked ? 0 : axes.y,
       yaw: this.cam.yaw,
-      jump: inp.isDown('jump'),
-      jumpPressed: inp.wasPressed('jump') || (inp.isDown('jump') && this.character.state.grounded),
-      sprint: inp.isDown('sprint'),
-      crouch: inp.isDown('crouch'),
+      jump: !blocked && inp.isDown('jump'),
+      jumpPressed: !blocked && (inp.wasPressed('jump') || (inp.isDown('jump') && this.character.state.grounded)),
+      sprint: !blocked && !exhausted && inp.isDown('sprint'),
+      crouch: !blocked && inp.isDown('crouch'),
+      speedMul: mod.speedMul,
+      current: mod.current,
     });
     this.physics.step(dt);
     this.updateCaves();
+    gp.update(dt, this.camera, playing);
     inp.endFrame();
   }
 
@@ -210,6 +226,7 @@ export class Game {
 
   private setCaveVisuals(inCave: boolean): void {
     this.chunks.group.visible = !inCave;
+    this.gameplay.setCaveVisuals(inCave);
     this.water.mesh.visible = !inCave;
     this.sky.mesh.visible = !inCave;
     this.sky.sun.visible = !inCave;
@@ -237,6 +254,9 @@ export class Game {
       this.chunks.update(f.x, f.z, 2);
     }
     this.cam.update(frameDt, f, cs.crouching, cs.swimming);
+    this.camera.rotateZ(this.gameplay.cameraRoll(s.reducedMotion));
+    this.gameplay.frame();
+    this.gameplay.render(frameDt, this.camera, s.reducedMotion);
 
     // Underwater look.
     const underwater = !inCave && this.camera.position.y < WATER_Y - 0.05 && !this.terrainAbove(this.camera.position);
@@ -248,8 +268,9 @@ export class Game {
         this.fog.far = 28;
       } else {
         this.fog.color.copy(this.sky.fogColor);
-        this.fog.near = 60;
-        this.fog.far = p.viewDistance * CHUNK_SIZE;
+        const vis = this.gameplay.visibility;
+        this.fog.near = 60 * vis;
+        this.fog.far = Math.max(50, p.viewDistance * CHUNK_SIZE * vis);
       }
     }
     this.water.update(this.elapsed, this.camera.position);
@@ -319,6 +340,7 @@ export class Game {
   dispose(): void {
     this.disposed = true;
     this.loop.stop();
+    this.gameplay.dispose();
     document.removeEventListener('pointerlockchange', this.onLockChange);
     this.unsubSettings();
     this.resizeObs.disconnect();

@@ -17,6 +17,8 @@ export interface Placement {
 }
 
 export const windUniform = { value: 0 };
+/** 0..1 wind strength driven by weather; scales tree and grass sway. */
+export const windStrength = { value: 0.1 };
 
 function colorize(g: THREE.BufferGeometry, r: number, gr: number, b: number, jitter = 0): THREE.BufferGeometry {
   const geo = g.index ? g.toNonIndexed() : g;
@@ -102,8 +104,9 @@ export function makeVegMaterial(sway: number, doubleSide = false): THREE.MeshLam
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: doubleSide ? THREE.DoubleSide : THREE.FrontSide });
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = windUniform;
+    shader.uniforms.uWind = windStrength;
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime;')
+      .replace('#include <common>', '#include <common>\nuniform float uTime; uniform float uWind;')
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
@@ -112,7 +115,7 @@ export function makeVegMaterial(sway: number, doubleSide = false): THREE.MeshLam
         #else
           vec3 ip = vec3(0.0);
         #endif
-        float bend = max(position.y, 0.0) * ${sway.toFixed(3)};
+        float bend = max(position.y, 0.0) * ${sway.toFixed(3)} * (0.5 + uWind * 3.0);
         float ph = uTime * 1.6 + ip.x * 0.25 + ip.z * 0.17;
         transformed.x += sin(ph) * bend * (0.6 + 0.4 * sin(uTime * 0.37 + ip.z));
         transformed.z += cos(ph * 0.8) * bend * 0.6;`,

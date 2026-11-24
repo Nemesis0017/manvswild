@@ -11,6 +11,10 @@ export interface MoveCommand {
   jumpPressed: boolean;
   sprint: boolean;
   crouch: boolean;
+  /** Optional movement speed multiplier from encumbrance, injuries, weather, grip. */
+  speedMul?: number;
+  /** Optional extra water velocity (river current) in m/s. */
+  current?: { x: number; z: number };
 }
 
 export const CAPSULE_RADIUS = 0.35;
@@ -50,6 +54,8 @@ export class CharacterController {
   frozen = false;
   private wasGrounded = false;
   private lastVy = 0;
+  /** Decaying push velocity, for knockbacks. */
+  knockX = 0; knockZ = 0;
 
   constructor(physics: PhysicsWorld, private terrain: Terrain, feetX: number, feetY: number, feetZ: number) {
     const w = physics.world;
@@ -70,6 +76,12 @@ export class CharacterController {
   get feet(): { x: number; y: number; z: number } {
     const t = this.body.translation();
     return { x: t.x, y: t.y - BODY_HALF_HEIGHT, z: t.z };
+  }
+
+  /** Add a knockback impulse (m/s) that fades over about half a second. */
+  push(x: number, z: number): void {
+    this.knockX += x;
+    this.knockZ += z;
   }
 
   teleport(x: number, feetY: number, z: number): void {
@@ -93,6 +105,7 @@ export class CharacterController {
     st.sprinting = cmd.sprint && !st.crouching && cmd.y > 0 && !swimming;
     let speed = st.crouching ? CROUCH_SPEED : st.sprinting ? SPRINT_SPEED : WALK_SPEED;
     if (swimming) speed = SWIM_SPEED * (cmd.sprint ? 1.4 : 1);
+    speed *= cmd.speedMul ?? 1;
     const inputLen = Math.hypot(cmd.x, cmd.y);
 
     // Camera-relative horizontal direction (yaw 0 looks toward -Z).
@@ -134,7 +147,10 @@ export class CharacterController {
       if (this.vy < -45) this.vy = -45;
     }
 
-    const desired = { x: this.vx * dt, y: this.vy * dt, z: this.vz * dt };
+    const cur = swimming && cmd.current ? cmd.current : { x: 0, z: 0 };
+    const kd = Math.exp(-5 * dt);
+    this.knockX *= kd; this.knockZ *= kd;
+    const desired = { x: (this.vx + cur.x + this.knockX) * dt, y: this.vy * dt, z: (this.vz + cur.z + this.knockZ) * dt };
     this.ctrl.computeColliderMovement(this.collider, desired);
     const m = this.ctrl.computedMovement();
     const grounded = this.ctrl.computedGrounded();
