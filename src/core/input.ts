@@ -2,7 +2,8 @@ export type Action =
   | 'forward' | 'back' | 'left' | 'right'
   | 'jump' | 'sprint' | 'crouch' | 'interact'
   | 'toggleCamera' | 'inventory' | 'map' | 'pause'
-  | 'use' | 'build' | 'rest' | 'throw' | 'rotate' | 'primary' | 'secondary';
+  | 'use' | 'build' | 'rest' | 'throw' | 'rotate' | 'primary' | 'secondary'
+  | 'journal' | 'waypoint' | 'hideHud' | 'quickSave' | 'quickLoad';
 
 export type Bindings = Record<Action, string[]>;
 
@@ -26,6 +27,11 @@ export const DEFAULT_BINDINGS: Bindings = {
   rotate: ['KeyQ'],
   primary: ['Mouse0'],
   secondary: ['Mouse2'],
+  journal: ['KeyJ'],
+  waypoint: ['KeyX'],
+  hideHud: ['KeyH'],
+  quickSave: ['F5'],
+  quickLoad: ['F9'],
 };
 
 const BIND_KEY = 'manvswild.bindings.v1';
@@ -137,6 +143,7 @@ export class InputManager {
       this.padButtons = {
         jump: b(0), crouch: b(1), interact: b(2), toggleCamera: b(3),
         sprint: b(10), inventory: b(4), map: b(5), pause: b(9),
+        use: b(7), throw: b(6), build: b(8), journal: b(12), rest: b(13), rotate: b(14), hideHud: b(15),
       };
     } else {
       this.padAxes = { lx: 0, ly: 0, rx: 0, ry: 0 };

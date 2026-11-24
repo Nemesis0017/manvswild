@@ -23,6 +23,15 @@ export interface GameEvents extends Record<string, unknown> {
   playerJumped: undefined;
   playerLanded: { speed: number };
   signalRaised: { x: number; z: number };
+  gathered: { count: number };
+  crafted: { id: string };
+  built: { kind: string };
+  fishCaught: undefined;
+  waterCollected: undefined;
+  campsiteLooted: { id: string };
+  thrown: undefined;
+  thunder: { delay: number };
+  animalCall: { species: string; x: number; y: number; z: number; kind: 'warn' | 'strike' };
 }
 
 export const events = new EventBus<GameEvents>();

@@ -10,8 +10,9 @@ import { Inventory, equipFromSlot, unequip } from '../items/inventory';
 import { HOTBAR_SLOTS, ITEMS, type ItemId } from '../items/items';
 import { NODE_DEFS, NodeRegistry, rollDrops, weatherYield, type WorldNode } from '../items/nodes';
 import { NodeView } from '../items/nodeView';
-import { SKILL_NAMES, addXp, createSkills, skillLevel, type SkillId } from '../items/skills';
-import { DIFFICULTIES, type DifficultyId } from '../survival/difficulty';
+import { SKILL_IDS, SKILL_NAMES, addXp, createSkills, normalizeSkills, skillLevel, type SkillId } from '../items/skills';
+import { adjustMods, DEFAULT_SANDBOX, type ModeContext } from '../game/modes';
+import { DIFFICULTIES, type DifficultyId, type DifficultyMods } from '../survival/difficulty';
 import { ROCKFALL_WARNING, ROCK_DAMAGE, currentAt, rockHits, rockfallChancePerSecond, type RockFall } from '../survival/hazards';
 import {
   acceptRescue, addInjury, applyDamage, createSurvival, fallDamage, hudWarnings, movementMultiplier,
@@ -86,7 +87,7 @@ export class Gameplay {
   private rng: () => number;
   private modifiers: MoveModifiers = { speedMul: 1, current: { x: 0, z: 0 }, lockMovement: false, freeze: false };
   private prompt = '';
-  private target: { kind: 'node'; node: WorldNode } | { kind: 'piece'; piece: Piece } | { kind: 'water' } | null = null;
+  private target: { kind: 'node'; node: WorldNode } | { kind: 'piece'; piece: Piece } | { kind: 'water' } | { kind: 'camp'; id: string } | null = null;
   private inCave = false;
   private tmpDir = new THREE.Vector3();
   private tmpEye = new THREE.Vector3();
@@ -97,6 +98,15 @@ export class Gameplay {
   private lastHudFlash = 0;
   /** Debug and test access: how many animal strikes the player has absorbed. */
   strikesTaken = 0;
+  /** Mode adjustments on top of difficulty (set by the Session). */
+  modeCtx: ModeContext = { mode: 'story', escalation: 1, sandbox: { ...DEFAULT_SANDBOX }, scenario: null };
+  /** Hooks supplied by the Session for world points of interest. */
+  hooks: { campsiteNear: (x: number, z: number) => { id: string } | null; lootCampsite: (id: string) => void } | null = null;
+  /** When set, the weather is held at this value. */
+  weatherLock: WeatherId | null = null;
+  private startItems: { id: ItemId; count: number }[] | null = null;
+  private modsCache: { key: string; mods: DifficultyMods } | null = null;
+  private xpFrac = new Map<SkillId, number>();
 
   constructor(
     scene: THREE.Scene,
@@ -117,21 +127,66 @@ export class Gameplay {
     this.group.add(this.wildlife.group, this.nodeView.group, this.weatherFx.group, this.campLight, this.torchLight);
     scene.add(this.group);
     this.unsubLanded = events.on('playerLanded', this.onLanded);
-    this.weatherFx.onThunder = () => {
+    this.weatherFx.onThunder = (delay) => {
+      events.emit('thunder', { delay });
       this.say('Thunder rumbles in the distance.');
     };
     this.giveStartingItems();
     this.publish();
   }
 
-  get mods() { return DIFFICULTIES[this.difficulty]; }
+  get mods(): DifficultyMods {
+    const c = this.modeCtx;
+    const sb = c.sandbox;
+    const key = `${this.difficulty}|${c.mode}|${c.escalation.toFixed(2)}|${sb.needs}|${sb.invulnerable}|${sb.resourceMult}|${c.scenario?.id ?? ''}`;
+    if (!this.modsCache || this.modsCache.key !== key) this.modsCache = { key, mods: adjustMods(DIFFICULTIES[this.difficulty], c) };
+    return this.modsCache.mods;
+  }
   get time() { return this.gameTime; }
   get currentWeather(): WeatherId { return this.weather.current; }
 
   private giveStartingItems(): void {
+    if (this.startItems) {
+      for (const it of this.startItems) this.inventory.add(it.id, it.count);
+      return;
+    }
     this.inventory.add('waterskin', 1);
     this.inventory.add('berries', 4);
     this.inventory.add('branch', 2);
+  }
+
+  /** Replace the starting inventory (used by sandbox kits and expedition scenarios). */
+  setStartItems(items: { id: ItemId; count: number }[]): void {
+    this.startItems = items;
+    this.inventory = new Inventory();
+    this.giveStartingItems();
+    this.publish();
+  }
+
+  setStartWeather(w: WeatherId): void {
+    this.weather = new WeatherMachine(mulberry32(hashInts(this.seed, 5, 5)), w);
+  }
+
+  /** Move the spawn/respawn point (expedition biome starts). */
+  setSpawn(x: number, z: number): void {
+    this.spawn = { x, z };
+  }
+
+  /** Grant skill xp from a story or character source. Silent grants skip the level-up message. */
+  grantXp(id: SkillId, amount: number, silent = false): void {
+    const lvl = addXp(this.skills, id, amount);
+    if (lvl && !silent) this.say(`${SKILL_NAMES[id]} skill increased to level ${lvl}.`);
+    this.publish();
+  }
+
+  /** Small fractional xp gained by doing things (swimming, climbing, running). */
+  trickleXp(id: SkillId, amount: number): void {
+    const acc = (this.xpFrac.get(id) ?? 0) + amount;
+    if (acc >= 1) {
+      const whole = Math.floor(acc);
+      this.xpFrac.set(id, acc - whole);
+      this.gainXp(id, whole);
+    } else this.xpFrac.set(id, acc);
   }
 
   setDifficulty(id: DifficultyId): void {
@@ -199,8 +254,8 @@ export class Gameplay {
   get panelOpen(): boolean { return this.panel !== 'none'; }
   get panelName(): Panel { return this.panel; }
 
-  togglePanel(): void {
-    this.setPanel(this.panel === 'none' ? 'inventory' : 'none');
+  togglePanel(p: Panel = 'inventory'): void {
+    this.setPanel(this.panel === p ? 'none' : p);
   }
 
   // ---------- Per-frame ----------
@@ -216,6 +271,8 @@ export class Gameplay {
     let speedMul = movementMultiplier(s, enc) * this.fx.movement * grip;
     const held = this.held();
     if (held?.id === 'raft' && this.character.state.swimming) speedMul *= 1.6;
+    if (this.character.state.swimming) speedMul *= 1 + 0.05 * (skillLevel(this.skills.swimming) - 1);
+    if (this.character.state.climbing) speedMul *= 1 + 0.05 * (skillLevel(this.skills.climbing) - 1);
     const river = this.inCave ? 0 : this.terrain.sample(f.x, f.z).river;
     const current = this.character.state.swimming ? currentAt(f.x, f.z, river, this.gameTime) : { x: 0, z: 0 };
     const failing = s.phase !== 'alive';
@@ -237,7 +294,9 @@ export class Gameplay {
   handleInput(inp: InputManager, camera: THREE.Camera): void {
     const s = this.survival;
     if (s.phase !== 'alive') return;
-    if (inp.wasPressed('inventory')) this.togglePanel();
+    if (inp.wasPressed('inventory')) this.togglePanel(this.panel === 'none' || this.panel === 'storage' ? 'inventory' : 'none');
+    else if (inp.wasPressed('map')) this.togglePanel('map');
+    else if (inp.wasPressed('journal')) this.togglePanel('journal');
     if (this.panel !== 'none') return;
 
     for (let i = 0; i < HOTBAR_SLOTS; i++) {
@@ -286,6 +345,9 @@ export class Gameplay {
 
     // Weather and ambient temperature
     this.weather.update(dt, biome, this.sky.timeOfDay);
+    if (this.weatherLock && this.weather.current !== this.weatherLock) {
+      if (this.weather.next !== this.weatherLock) this.weather.force(this.weatherLock);
+    }
     this.fx = this.weather.effects(biome, mods.weatherSeverity);
     this.sky.overcast = this.inCave ? 0 : this.fx.cloudCover;
     this.sky.dim = this.inCave ? 0 : this.fx.dim;
@@ -296,7 +358,7 @@ export class Gameplay {
 
     // Buildings
     const bfx = effectsAt(this.pieces, f.x, f.z);
-    const destroyed = tickPieces(this.pieces, dt, this.inCave ? 0 : this.fx.rain + this.fx.snow * 0.5, this.fx.wind, mods.weatherSeverity);
+    const destroyed = tickPieces(this.pieces, dt, this.inCave ? 0 : this.fx.rain + this.fx.snow * 0.5, this.fx.wind, mods.weatherSeverity * (1 - 0.06 * (skillLevel(this.skills.shelter) - 1)));
     for (const id of destroyed) this.removePiece(id, true);
     let warmth = bfx.warmth;
     const held = this.held();
@@ -323,6 +385,8 @@ export class Gameplay {
       encumbrance: this.inventory.totalWeight() / this.inventory.weightLimit,
     };
     const res = tickSurvival(s, env, dt, mods);
+    const endLvl = skillLevel(this.skills.endurance);
+    if (endLvl > 1 && s.phase === 'alive') s.stamina = Math.min(100, s.stamina + (endLvl - 1) * 0.6 * dt);
     for (const w of res.warnings) this.warnOnce(w, 30);
     if (s.phase === 'alive') {
       if (s.thirst < 15) this.warnOnce('You are very thirsty. Find water.', 60);
@@ -451,10 +515,11 @@ export class Gameplay {
       playerX: f.x, playerZ: f.z,
       playerSpeed: cs.speed, crouching: cs.crouching, sprinting: cs.sprinting && cs.speed > 1,
       visibility: this.visibility, night: tod < 0.22 || tod > 0.78,
-      detectMult: this.mods.detection, noises: [],
+      detectMult: this.mods.detection * (1 - 0.04 * (skillLevel(this.skills.wildlife) - 1)), noises: [],
     });
     for (const { animal, ev } of evs) {
       const name = SPECIES[animal.species].name;
+      if (ev.warned) events.emit('animalCall', { species: animal.species, x: animal.x, y: animal.y, z: animal.z, kind: 'warn' });
       if (ev.warned) this.warnOnce(`A ${name.toLowerCase()} has noticed you and is warning you off. Back away slowly, or throw a stone to distract it.`, 12);
       if (ev.strike && this.survival.phase === 'alive') {
         // Defensive push only: knockback, lost breath and a minor strain. No health damage.
@@ -465,11 +530,18 @@ export class Gameplay {
         addInjury(this.survival, 'strain', 30, this.mods);
         this.stagger = 0.8;
         this.strikesTaken++;
+        events.emit('animalCall', { species: animal.species, x: animal.x, y: animal.y, z: animal.z, kind: 'strike' });
         this.say(`The ${name.toLowerCase()} shoves you back and retreats. Keep your distance.`);
       }
     }
     const n = this.wildlife.nearest;
     hudStore.setState({ animal: n && n.dist < 40 ? `${n.name} (${n.state})` : '' });
+  }
+
+  /** Footstep noise: heavier surfaces and sprinting are louder, crouching is quiet. */
+  noiseFootstep(x: number, z: number, surfaceLoudness: number, sprinting: boolean, crouching: boolean): void {
+    if (crouching || !sprinting) return;
+    this.wildlife.addNoise(x, z, surfaceLoudness * 0.25);
   }
 
   private noiseAt(x: number, z: number, loudness: number): void {
@@ -520,6 +592,10 @@ export class Gameplay {
       const sc = facing(n.x, n.z);
       if (sc > best) { best = sc; this.target = { kind: 'node', node: n }; }
     }
+    if (!this.target && !this.inCave) {
+      const camp = this.hooks?.campsiteNear(f.x, f.z);
+      if (camp) this.target = { kind: 'camp', id: camp.id };
+    }
     if (!this.target && this.waterAhead(camera)) this.target = { kind: 'water' };
 
     const t = this.target;
@@ -535,6 +611,8 @@ export class Gameplay {
       if (p.kind === 'campfire') this.prompt = `E  Add wood (${Math.ceil(p.fuel)}s of fuel)   Craft at the fire: boil water, cook fish`;
       else if (p.kind === 'storage') this.prompt = 'E  Open storage';
       else if (p.kind === 'shelter') this.prompt = `E  Repair shelter (${Math.round(p.durability)}%)`;
+    } else if (t.kind === 'camp') {
+      this.prompt = 'E  Search the abandoned campsite';
     } else {
       if (held?.id === 'fishing_rod') this.prompt = this.fishing.phase === 'bite' ? 'E  Reel in!' : this.fishing.phase === 'waiting' ? 'Waiting for a bite...' : 'E  Cast line';
       else if (this.inventory.has('waterskin')) this.prompt = 'E  Collect water (untreated)';
@@ -546,6 +624,7 @@ export class Gameplay {
     const t = this.target;
     if (!t) return;
     if (t.kind === 'node') this.gather(t.node);
+    else if (t.kind === 'camp') this.lootCamp(t.id);
     else if (t.kind === 'piece') {
       const p = t.piece;
       if (p.kind === 'campfire') {
@@ -564,6 +643,22 @@ export class Gameplay {
     this.publish();
   }
 
+  private lootCamp(id: string): void {
+    const loot: { id: ItemId; count: number }[] = [
+      { id: 'salvage', count: 2 }, { id: 'rope', count: 1 }, { id: 'leaf', count: 4 }, { id: 'water_clean', count: 1 },
+    ];
+    if (id === 'camp:0') loot.push({ id: 'signal_kit', count: 1 });
+    const got: string[] = [];
+    for (const l of loot) {
+      const rest = this.inventory.add(l.id, l.count);
+      if (l.count - rest > 0) got.push(`${l.count - rest} ${ITEMS[l.id].name}`);
+    }
+    this.hooks?.lootCampsite(id);
+    events.emit('campsiteLooted', { id });
+    this.say(`You search the campsite and find: ${got.join(', ') || 'nothing you can carry'}.`);
+    this.gainXp('foraging', 4);
+  }
+
   private gather(node: WorldNode): void {
     const def = NODE_DEFS[node.kind];
     const held = this.held();
@@ -579,6 +674,7 @@ export class Gameplay {
       if (d.count - rest > 0) got.push(`${d.count - rest} ${ITEMS[d.id].name}`);
     }
     if (got.length === 0) { this.say('You cannot carry any more.'); return; }
+    events.emit('gathered', { count: drops.reduce((a, d) => a + d.count, 0) });
     this.nodes.deplete(node, this.gameTime, this.mods.respawn);
     this.nodeView.markDirty();
     if (toolOk && this.inventory.wear(this.selected, 1)) this.say(`Your ${ITEMS[held!.id].name.toLowerCase()} broke.`);
@@ -610,6 +706,7 @@ export class Gameplay {
           const rest = this.inventory.add('fish_raw', 1);
           this.say(rest ? 'You hooked a fish but cannot carry it.' : 'You caught a fish!');
           this.gainXp('fieldcraft', 3);
+          events.emit('fishCaught', undefined);
         } else this.say('The fish slipped away.');
         if (this.inventory.wear(this.selected, 1)) this.say('Your fishing rod broke.');
       } else this.cancelFishing('You reel in the line.');
@@ -617,10 +714,11 @@ export class Gameplay {
     }
     void camera;
     if (this.inventory.has('waterskin')) {
-      if (this.inventory.add('water_dirty', 1) === 0) this.say('You fill your waterskin. Boil or purify it before drinking.');
+      if (this.inventory.add('water_dirty', 1) === 0) { this.say('You fill your waterskin. Boil or purify it before drinking.'); events.emit('waterCollected', undefined); }
       else this.say('You cannot carry more water.');
     } else {
       this.applyUse({ thirst: 20, sickChance: 0.5 }, 'You drink from the water.');
+      events.emit('waterCollected', undefined);
     }
   }
 
@@ -750,6 +848,7 @@ export class Gameplay {
   throwStone(camera: THREE.Camera): void {
     if (!this.inventory.has('stone') || this.survival.phase !== 'alive') { this.say('You have no stone to throw.'); return; }
     this.inventory.remove('stone', 1);
+    events.emit('thrown', undefined);
     const { eye, dir } = this.lookRay(camera);
     const flat = Math.hypot(dir.x, dir.z) || 1;
     const dist = 12 + Math.max(0, 1 + dir.y) * 6;
@@ -852,6 +951,7 @@ export class Gameplay {
     this.addPiece(piece);
     this.gainXp('crafting', r.xp ?? 2);
     this.say(`${PIECES[b.kind].name} built.`);
+    events.emit('built', { kind: b.kind });
     this.noiseAt(b.x, b.z, 0.4);
     this.publish();
   }
@@ -915,6 +1015,7 @@ export class Gameplay {
     const res = craft(this.inventory, r, { skills: this.skills, nearCampfire });
     if (res.ok) {
       this.say(`Crafted ${ITEMS[res.item!].name}.`);
+      events.emit('crafted', { id: res.item! });
       if (r.xp) this.gainXp(r.station ? 'fieldcraft' : 'crafting', r.xp);
     } else this.say(res.reason ?? 'Cannot craft that.');
     this.publish();
@@ -992,7 +1093,7 @@ export class Gameplay {
       storage: store ? store.slots.map((x) => (x ? { ...x } : null)) : null,
       build: this.building ? { active: true, kind: PIECES[this.building.kind].name, valid: this.building.valid, reason: this.building.reason, recipeId: this.buildRecipe(this.building.kind).id } : null,
       recipes,
-      skills: (Object.keys(SKILL_NAMES) as SkillId[]).map((id) => ({ id, name: SKILL_NAMES[id], level: skillLevel(this.skills[id]) })),
+      skills: SKILL_IDS.map((id) => ({ id, name: SKILL_NAMES[id], level: skillLevel(this.skills[id]) })),
       fade: s.fade, phase: s.phase, failReason: s.failReason,
       rescuesLeft: Math.max(0, mods.rescues - s.rescuesUsed),
       resting: this.resting,
@@ -1030,7 +1131,7 @@ export class Gameplay {
     this.difficulty = d.difficulty;
     this.survival = structuredClone(d.survival);
     this.inventory = Inventory.deserialize(d.inventory);
-    this.skills = { ...d.skills };
+    this.skills = normalizeSkills(d.skills);
     for (const m of this.pieceMeshes.values()) this.group.remove(m.root);
     this.pieceMeshes.clear();
     this.pieces = [];

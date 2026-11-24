@@ -3,7 +3,7 @@ import type { DifficultyId } from '../survival/difficulty';
 import type { Equipment, Stack } from '../items/inventory';
 import type { Phase } from '../survival/survival';
 
-export type Panel = 'none' | 'inventory' | 'storage';
+export type Panel = 'none' | 'inventory' | 'storage' | 'map' | 'journal' | 'achievements' | 'stats' | 'skills';
 
 export interface RecipeView {
   id: string;

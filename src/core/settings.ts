@@ -8,6 +8,18 @@ export interface Settings {
   sensitivity: number;
   invertY: boolean;
   masterVolume: number;
+  musicVolume: number;
+  ambienceVolume: number;
+  sfxVolume: number;
+  shadows: boolean;
+  vegetationDensity: number;
+  bloom: boolean;
+  vignette: boolean;
+  colorGrade: 'none' | 'warm' | 'cool' | 'filmic';
+  motionBlur: boolean;
+  cameraShake: boolean;
+  hudHidden: boolean;
+  autosaveMinutes: number;
   adaptiveResolution: boolean;
   /** Accessibility */
   reducedMotion: boolean;
@@ -34,12 +46,29 @@ export const PRESETS: Record<GraphicsPreset, PresetValues> = {
   ultra: { viewDistance: 7, pixelRatio: 1.5, shadows: true, shadowMapSize: 4096, vegetationDensity: 1.3, antialias: true },
 };
 
+/** Preset values with the user's shadow and vegetation overrides applied. */
+export function effectivePreset(s: Pick<Settings, 'preset' | 'shadows' | 'vegetationDensity'>): PresetValues {
+  return { ...PRESETS[s.preset], shadows: s.shadows, vegetationDensity: s.vegetationDensity };
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   preset: 'medium',
   fov: 70,
   sensitivity: 1,
   invertY: false,
   masterVolume: 0.7,
+  musicVolume: 0.5,
+  ambienceVolume: 0.8,
+  sfxVolume: 0.8,
+  shadows: true,
+  vegetationDensity: 0.7,
+  bloom: false,
+  vignette: true,
+  colorGrade: 'none',
+  motionBlur: false,
+  cameraShake: true,
+  hudHidden: false,
+  autosaveMinutes: 2,
   adaptiveResolution: true,
   reducedMotion: false,
   highContrast: false,

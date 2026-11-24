@@ -13,10 +13,16 @@ export class PlayerModel {
   private phase = 0;
   private yawSmooth = 0;
   private lean = 0;
+  private shirtMat: THREE.MeshLambertMaterial;
+
+  setShirtColor(hex: number): void {
+    this.shirtMat.color.setHex(hex);
+  }
 
   constructor() {
     const skin = new THREE.MeshLambertMaterial({ color: 0xd9a57c });
     const shirt = new THREE.MeshLambertMaterial({ color: 0x6a7f4a });
+    this.shirtMat = shirt;
     const pants = new THREE.MeshLambertMaterial({ color: 0x4a4036 });
     const pack = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
     const box = (w: number, h: number, d: number, m: THREE.Material, y = 0) => {
